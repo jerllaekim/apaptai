@@ -12,7 +12,12 @@ st.title("⚖️ 한-러 법률 번역 AI 챗봇")
 # ====================================================================
 try:
     key_dict = json.loads(st.secrets["gcp_service_account"])
-    credentials = service_account.Credentials.from_service_account_info(key_dict)
+    
+    # [수정] 구글 클라우드 플랫폼 전체 권한 스코프를 명시해 줍니다. (invalid_scope 에러 해결)
+    credentials = service_account.Credentials.from_service_account_info(
+        key_dict
+    ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
+    
 except Exception as e:
     st.error(f"❌ [Secrets 파일 오류] JSON 키 형식을 확인하세요: {e}")
     st.stop()
