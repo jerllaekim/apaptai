@@ -16,46 +16,43 @@ try:
 except Exception as e:
     st.error(f"❌ [Secrets 파일 오류] JSON 키 형식을 확인하세요: {e}")
     st.stop()
-
 # ====================================================================
 # 2. 정래님의 구글 클라우드 환경 설정값
 # ====================================================================
 PROJECT_ID = "gen-lang-client-0036116601"
-LOCATION = "us-central1"               # 👈 엔드포인트 지역 (us-central1 또는 asia-northeast3)
-ENDPOINT_ID = "4166613057352499200"    # 👈 4로 시작하는 긴 숫자 키
+LOCATION = "us-central1"               
+ENDPOINT_ID = "4166613057352499200"    
 
-# 최신 GenAI 클라이언트에 인증 정보 주입하여 초기화
+# [수정] No API key 에러를 방지하기 위해 Vertex AI 환경임을 명시하여 초기화합니다.
 try:
     client = genai.Client(
-        credentials=credentials,
-        http_options={'api_version': 'v1alpha'}  # 튜닝 엔드포인트 호출을 위한 알파 버전 지정
+        vertexai=True,              # 👈 Vertex AI 인프라를 사용하겠다고 명시
+        project=PROJECT_ID,         # 👈 프로젝트 ID 명시
+        location=LOCATION,          # 👈 지역 명시
+        credentials=credentials     # 👈 다운로드받은 만능열쇠 주입
     )
 except Exception as e:
     st.error(f"❌ 구글 클라이언트 초기화 실패: {e}")
     st.stop()
 
 # ====================================================================
-# 3. 모델 호출 함수 정의 (최신 GenAI 정석 문법)
+# 3. 모델 호출 함수 정의 (Vertex AI 튜닝 모델 전용)
 # ====================================================================
 def predict_law_translation(text):
-    # 최신 SDK에서 튜닝 모델 엔드포인트를 지정하는 정석 경로 표현식
-    model_path = f"projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/{ENDPOINT_ID}"
-    
+    # vertexai=True 모드에서는 주소를 길게 안 쓰고 엔드포인트 ID만 깔끔하게 넘겨줍니다.
     try:
-        # 직렬화 오브젝트 없이 일반 텍스트 포맷으로 직접 찌릅니다.
         response = client.models.generate_content(
-            model=model_path,
+            model=f"endpoints/{ENDPOINT_ID}", # 👈 4로 시작하는 ID만 쏙 빌드
             contents=text,
             config=types.GenerateContentConfig(
-                temperature=0.2,  # 법률 번역이므로 일관성을 위해 낮춤
+                temperature=0.2,
             ),
         )
         return response.text
     except Exception as e:
         st.error(f"❌ 구글 API 호출 실패: {e}")
-        st.info("💡 만약 여기서 에러가 난다면 하드코딩된 LOCATION이 틀렸거나, 서비스 계정에 'Vertex AI User' 권한이 누락된 것입니다.")
+        st.info("💡 만약 여기서 에러가 난다면 서비스 계정에 'Vertex AI User' 권한이 빠졌거나 LOCATION 오타일 확률이 높습니다.")
         return None
-
 # ====================================================================
 # 4. 챗봇 UI 및 대화 처리
 # ====================================================================
