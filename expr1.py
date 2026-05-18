@@ -1,93 +1,76 @@
 import json
-import os
 import streamlit as st
-from google.cloud import discoveryengine_v1beta as discoveryengine
+from google.cloud import aiplatform
 from google.oauth2 import service_account
+from google.protobuf import json_format
+from google.protobuf.struct_pb2 import Value
 
 # ====================================================================
-# 1. 보안 인증 설정 (Streamlit Secrets 활용)
+# 1. 서비스 계정 JSON 키 인증 (Streamlit Secrets에서 가져옴)
 # ====================================================================
-# 깃허브에 올릴 때 키 노출을 막기 위해 st.secrets를 사용합니다.
 try:
+    # 이메일 ID가 아니라, 다운로드받은 JSON 파일 내용 전체를 사전 형태로 읽어옵니다.
     key_dict = json.loads(st.secrets["gcp_service_account"])
     credentials = service_account.Credentials.from_service_account_info(key_dict)
 except Exception as e:
-    st.error(f"⚠️ Secrets 설정 오류: {e}")
+    st.error(f"⚠️ Secrets 인증 오류: {e}")
     st.stop()
 
 # ====================================================================
-# 2. 구글 에이전트 정보 설정
+# 2. 정래님이 확인한 구글 클라우드 정보 입력
 # ====================================================================
 PROJECT_ID = "gen-lang-client-0036116601"
-LOCATION = "global"  # 에이전트는 global이 기본값입니다.
-DATA_STORE_ID = "여기에_데이터스토어_ID_입력"  # 👈 발급받은 데이터스토어 ID 입력
+LOCATION = "us-central1"               # 👈 [확인필요] 엔드포인트 화면에 적힌 지역명 입력
+ENDPOINT_ID = "4166613057352499200"    # 👈 정래님이 찾으신 4로 시작하는 배포 키
+
+# 인증 정보를 가지고 Vertex AI 시스템 초기화
+aiplatform.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
 
 # ====================================================================
-# 3. 에이전트 호출 함수 정의
+# 3. 모델 호출 함수 정의
 # ====================================================================
-def ask_legal_agent(user_query):
-    # 인증 정보를 주입하여 안전하게 클라이언트 생성
-    client = discoveryengine.SearchServiceClient(credentials=credentials)
-    
-    # 에이전트 서빙 경로 설정
-    serving_config = client.serving_config_path(
-        project=PROJECT_ID,
-        location=LOCATION,
-        data_store=DATA_STORE_ID,
-        serving_config="default_serving_config",
+def predict_law_translation(text):
+    # 만능열쇠(인증)를 들고 4...번 엔드포인트 사물함 주소로 찾아갑니다.
+    endpoint = aiplatform.Endpoint(
+        endpoint_name=f"projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/{ENDPOINT_ID}"
     )
     
-    # 에이전트가 학습된 지식을 토대로 답변(Summary)을 생성하도록 요청 구조 설계
-    request = discoveryengine.SearchRequest(
-        serving_config=serving_config,
-        query=user_query,
-        content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
-            summary_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec(
-                is_summary_enabled=True,
-                summary_result_count=3
-            )
-        )
-    )
+    # Gemini 튜닝 모델이 인식할 수 있는 정석 포맷으로 입력값 포장
+    instances = [
+        json_format.ParseDict({
+            "contents": [{"role": "user", "parts": [{"text": text}]}]
+        }, Value())
+    ]
     
-    response = client.search(string_request=request)
-    return response.summary.summary_text
+    # 구글 서버에 요청 후 결과 받기
+    response = endpoint.predict(instances=instances)
+    
+    # 모델의 첫 번째 답변 텍스트만 추출
+    return response.predictions[0]
 
 # ====================================================================
-# 4. Streamlit UI 구성 (챗봇 단일 도메인 전용)
+# 4. Streamlit 챗봇 UI 
 # ====================================================================
-st.set_page_config(
-    page_title="한-러 법률 챗봇 에이전트", 
-    page_icon="⚖️", 
-    layout="centered"
-)
+st.set_page_config(page_title="한-러 법률 번역기", page_icon="⚖️")
+st.title("⚖️ 한-러 법률 번역 AI 챗봇")
 
-st.title("⚖️ 한국 법률 지원 AI 에이전트")
-st.caption("러시아어 화자를 위한 대한민국 법률 번역 및 상담 챗봇")
-
-# 대화 기록 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 기존 대화 내용 렌더링
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# 사용자 입력창 (Chat Input)
-if user_input := st.chat_input("질문할 한국어 법령이나 상담 내용을 입력하세요..."):
-    
-    # 1. 사용자 메시지 화면 출력 및 세션 저장
+if user_input := st.chat_input("법제처 등에서 가져온 한국어 법률 문장을 입력하세요..."):
     with st.chat_message("user"):
         st.write(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
     
-    # 2. 에이전트 호출 및 답변 출력
     with st.chat_message("assistant"):
-        with st.spinner("에이전트가 법률 지식을 분석하여 러시아어로 전환 중입니다..."):
+        with st.spinner("파인튜닝된 모델이 번역 중입니다..."):
             try:
-                answer = ask_legal_agent(user_input)
+                answer = predict_law_translation(user_input)
                 st.write(answer)
-                # 3. 에이전트 답변 세션 저장
                 st.session_state.messages.append({"role": "assistant", "content": answer})
             except Exception as e:
-                st.error(f"API 호출 중 에러가 발생했습니다: {e}")
+                st.error(f"호출 실패: {e}\n\n지역(LOCATION) 설정이나 서비스 계정 권한을 다시 확인해보세요.")
