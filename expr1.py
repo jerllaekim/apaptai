@@ -5,14 +5,13 @@ import streamlit as st
 from google import genai
 from google.genai import types
 from google.oauth2 import service_account
-from bs4 import BeautifulSoup  # 👈 HTML로 오는 본문을 깨끗하게 닦아내기 위해 사용
 
-st.set_page_config(page_title="법제처 실시간 저격 실험실", page_icon="🧪", layout="wide")
-st.title("🧪 법제처 메인 API 팩트 연동 실험실")
-st.caption("카테고리를 다 긁어올 필요 없이, 타겟 ID만 무작위로 실시간 저격합니다.")
+st.set_page_config(page_title="한-러 법률 번역 실험실", page_icon="🧪", layout="wide")
+st.title("🧪 법제처 공식 JSON API 연동 실험실")
+st.caption("제공해주신 공식 URL을 기반으로 백엔드에서 실시간 랜덤 데이터를 추출하여 번역합니다.")
 
 # ====================================================================
-# 1. 백엔드 인증 (Secrets에서 구글 마스터키 및 법제처 OC 키 로드)
+# 1. 백엔드 인증 일괄 처리 (Secrets 로드)
 # ====================================================================
 try:
     key_dict = json.loads(st.secrets["gcp_service_account"])
@@ -20,8 +19,8 @@ try:
         key_dict
     ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
     
-    # 법제처 공식 OC 인증키 백엔드 로드
-    LAW_GO_OC = st.secrets["data_go_kr_key"] 
+    # 💡 정래님의Secrets에 등록된 data_go_kr_key를 법제처 OC(인증값)로 사용합니다.
+    LAW_GO_OC = st.secrets["data_go_kr_key"]
 except Exception as e:
     st.error(f"❌ 백엔드 환경 설정(Secrets) 로드 실패: {e}")
     st.stop()
@@ -38,54 +37,80 @@ except Exception as e:
     st.stop()
 
 # ====================================================================
-# 2. [수정] 보내주신 모바일 가이드 기준 실시간 본문 호출 함수
+# 2. [완벽 수정] 자바 코드 기반 공식 JSON API 호출 및 랜덤 추출 함수
 # ====================================================================
-def get_law_expc_realtime():
-    # 보내주신 법제처 메인 서버 URL
-    url = "http://www.law.go.kr/DRF/lawService.do"
+def get_random_law_from_official_api():
+    # 찐 법제처 공식 JSON 검색 엔드포인트 URL
+    url = "https://www.law.go.kr/DRF/lawSearch.do"
     
-    # 💡 실험용으로 널리 쓰이는 법령해석례 일련번호(ID) 범위를 지정합니다.
-    # 테스트를 위해 대략 최근 데이터 ID 범위인 30000 ~ 32000 사이를 무작위로 찌릅니다.
-    random_id = random.randint(30000, 32000)
-    
+    # 정래님이 주신 규격에 맞춰 파라미터 빌드
     params = {
-        "OC": LAW_GO_OC,
-        "target": "expc",       # 👈 법령해석례 타겟 명시
-        "ID": str(random_id),   # 👈 랜덤으로 생성한 일련번호 저격
-        "type": "HTML",         # 👈 가이드대로 HTML 지정
-        "mobileYn": "Y"         # 👈 가이드 필수값 설정
+        "OC": LAW_GO_OC,      # 💡 Secrets에 저장해둔 정래님의 OC인증값 (jlk092 등)
+        "target": "law",       # 서비스 대상 (법령)
+        "type": "json"         # 👈 완벽한 JSON 포맷 요청
+    }
+    
+    # 스트림릿 서버 차단 방지용 일반 브라우저 가면(Header) 착용
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
     }
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        # 실시간 호출
+        response = requests.get(url, params=params, headers=headers, timeout=12)
+        
         if response.status_code != 200:
-            return None, f"법제처 통신 실패 (코드: {response.status_code})"
+            return None, f"❌ 법제처 응답 에러 (Status Code: {response.status_code})"
             
-        # 법제처가 준 HTML 덩어리에서 글자 찌꺼기를 파이썬 BeautifulSoup으로 청소합니다.
-        soup = BeautifulSoup(response.text, "html.parser")
+        # 껍질 벗길 필요 없이 곧바로 파이썬 JSON 데이터로 로드!
+        data = response.json()
         
-        # 전체 텍스트 추출 및 공백 정리
-        cleaned_text = soup.get_text(separator="\n").strip()
-        
-        if "조회된 데이터가 없습니다" in cleaned_text or len(cleaned_text) < 100:
-            # 주사위 번호가 빈 사물함일 경우 한 번 더 재귀 호출하거나 패스
-            return None, "빈 사물함(존재하지 않는 ID)이 뽑혔습니다. 다시 눌러보세요."
+        # 법제처 검색 서비스의 실제 JSON 트리 구조를 추적하여 목록 추출
+        # 구조: data['SearchLawService']['law'] -> 리스트 형태
+        try:
+            laws_list = data.get("SearchLawService", {}).get("law", [])
+        except AttributeError:
+            return None, f"🚨 예상치 못한 JSON 구조입니다. 원본 데이터: {data}"
             
-        return random_id, cleaned_text
+        if not laws_list:
+            return None, "조회된 법령 데이터 목록이 비어있습니다."
+            
+        # 🎲 [핵심] 넘어온 법령 목록 중에서 주사위를 굴려 단 1개만 랜덤 선택!
+        selected_law = random.choice(laws_list)
+        
+        # 실제 법제처 JSON 내부의 표준 키값들로 안전하게 맵핑
+        title = selected_law.get("법령명한글", "알 수 없는 법령")
+        law_id = selected_law.get("법령ID", "ID 없음")
+        link = selected_law.get("법령상세링크", "")
+        main_info = selected_law.get("소관부처명", "소관부처 미정")
+        
+        st.toast(f"📥 실시간 랜덤 법령 선택 완료: {title}", icon="🎲")
+        
+        # 팩트 컨텍스트 구성
+        context = f"""
+        [법령명]: {title}
+        [법령 고유 ID]: {law_id}
+        [소관 부처]: {main_info}
+        [상세 링크]: https://www.law.go.kr{link}
+        """
+        return title, context
+        
     except Exception as e:
-        return None, f"API 가동 에러: {e}"
+        return None, f"🚨 백엔드 API 결합 가동 실패: {e}"
 
 # ====================================================================
 # 3. 파인튜닝 모델 호출 함수
 # ====================================================================
-def predict_law_translation(law_context):
+def predict_law_translation(law_title, law_context):
     full_model_path = f"projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/{ENDPOINT_ID}"
     
     prompt = f"""
-    당신은 대한민국 법률 전문가이자 최고의 번역가입니다.
-    다음 [법제처 실시간 해석례 본문]을 분석하고, 핵심 질의와 답변 내용을 요약하여 정확한 러시아어(Russian)로 전문적인 번역 가이드를 출력하세요.
+    당신은 대한민국 관세 및 법률 전문가이자 최고의 번역가입니다.
+    [법제처 실시간 호출 법령 정보]를 정밀히 분석하고, 정래님의 파인튜닝 가이드라인 스타일 스타일에 맞춰 이 법령의 요약 정보와 가이드를 정확한 러시아어(Russian)로 변환하여 출력하세요.
 
-    [법제처 실시간 해석례 본문]:
+    [대상 법령]: {law_title}
+    [법제처 실시간 호출 법령 정보]:
     {law_context}
     """
     try:
@@ -99,28 +124,32 @@ def predict_law_translation(law_context):
         return f"❌ 구글 튜닝 모델 호출 실패: {e}"
 
 # ====================================================================
-# 4. 실험실 UI (버튼)
+# 4. 실험실 UI (버튼 제어)
 # ====================================================================
 st.write("---")
-if st.button("🎲 법제처 메인 서버에서 랜덤 ID 저격 호출하기", type="primary"):
+st.write("### 🎲 무작위 법령 호출 및 번역 시스템")
+
+if st.button("🚀 찐 법제처 API 랜덤 저격 및 러시아어 번역 시작", type="primary"):
     
-    with st.spinner("법제처 메인 서버에 무작위 ID 찌르는 중..."):
-        picked_id, fetched_context = get_law_expc_realtime()
+    with st.spinner("1. 정래님의 찐 API 주소로 실시간 JSON 데이터 긁어오는 중..."):
+        result = get_random_law_from_official_api()
         
-    if picked_id:
-        st.toast(f"📥 ID {picked_id}번 저격 성공!", icon="✅")
+    if result and result[0]:
+        law_title, fetched_context = result
         
+        # 화면 좌우 분할
         col1, col2 = st.columns(2)
+        
         with col1:
-            st.info(f"### 🇰🇷 법제처 실시간 원문 (ID: {picked_id})")
-            # 텍스트가 너무 길면 보기 힘드니까 스크롤 박스 형태로 출력
-            st.text_area("HTML 파싱 완료된 원본 데이터", fetched_context, height=450)
+            st.info("### 🇰🇷 법제처 실시간 수신 데이터")
+            st.markdown(f"**⚖️ 선택된 법령:** {law_title}")
+            st.text_area("파싱된 JSON 내부 정보 데이터", fetched_context, height=300)
             
         with col2:
             st.success("### 🇷🇺 파인튜닝 모델 러시아어 가이드")
-            with st.spinner("튜닝 모델이 원문을 기반으로 변환 중..."):
-                translated_result = predict_law_translation(fetched_context)
+            with st.spinner("2. 내 튜닝 모델이 원문 기반 번역문 가동 중..."):
+                translated_result = predict_law_translation(law_title, fetched_context)
             st.markdown(translated_result)
     else:
-        # 빈 사물함 떴을 때 안내
-        st.warning(fetched_context)
+        # 에러 핸들링 메세지 출력
+        st.error(result[1] if result else "데이터를 로드하지 못했습니다.")
