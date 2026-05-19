@@ -5,13 +5,14 @@ import streamlit as st
 from google import genai
 from google.genai import types
 from google.oauth2 import service_account
+from bs4 import BeautifulSoup  # 👈 HTML로 오는 본문을 깨끗하게 닦아내기 위해 사용
 
-st.set_page_config(page_title="법률 번역 실험실", page_icon="🧪", layout="wide")
-st.title("🧪 한-러 법률 번역 및 API 연동 실험실")
-st.caption("버튼을 누르면 실시간 법제처 데이터를 가져와 파인튜닝 모델로 번역합니다.")
+st.set_page_config(page_title="법제처 실시간 저격 실험실", page_icon="🧪", layout="wide")
+st.title("🧪 법제처 메인 API 팩트 연동 실험실")
+st.caption("카테고리를 다 긁어올 필요 없이, 타겟 ID만 무작위로 실시간 저격합니다.")
 
 # ====================================================================
-# 1. 백엔드 인증 일괄 처리 (Secrets 로드)
+# 1. 백엔드 인증 (Secrets에서 구글 마스터키 및 법제처 OC 키 로드)
 # ====================================================================
 try:
     key_dict = json.loads(st.secrets["gcp_service_account"])
@@ -19,76 +20,74 @@ try:
         key_dict
     ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
     
-    DATA_GO_KR_KEY = st.secrets["data_go_kr_key"]
+    # 법제처 공식 OC 인증키 백엔드 로드
+    LAW_GO_OC = st.secrets["data_go_kr_key"] 
 except Exception as e:
     st.error(f"❌ 백엔드 환경 설정(Secrets) 로드 실패: {e}")
     st.stop()
 
-# ====================================================================
-# 2. 구글 클라우드 환경 설정값 및 클라이언트 초기화
-# ====================================================================
+# 구글 클라이언트 초기화
 PROJECT_ID = "gen-lang-client-0036116601"
 LOCATION = "us-central1"               
 ENDPOINT_ID = "4166613057352499200"    
 
 try:
-    client = genai.Client(
-        vertexai=True,              
-        project=PROJECT_ID,         
-        location=LOCATION,          
-        credentials=credentials     
-    )
+    client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION, credentials=credentials)
 except Exception as e:
     st.error(f"❌ 구글 클라이언트 초기화 실패: {e}")
     st.stop()
 
 # ====================================================================
-# 3. 법제처 API 실시간 랜덤 호출 함수
+# 2. [수정] 보내주신 모바일 가이드 기준 실시간 본문 호출 함수
 # ====================================================================
-def get_random_law_from_public_api():
-    url = "http://apis.data.go.kr/1220000/CgmExpcService/getCgmExpcList"
+def get_law_expc_realtime():
+    # 보내주신 법제처 메인 서버 URL
+    url = "http://www.law.go.kr/DRF/lawService.do"
+    
+    # 💡 실험용으로 널리 쓰이는 법령해석례 일련번호(ID) 범위를 지정합니다.
+    # 테스트를 위해 대략 최근 데이터 ID 범위인 30000 ~ 32000 사이를 무작위로 찌릅니다.
+    random_id = random.randint(30000, 32000)
+    
     params = {
-        "serviceKey": DATA_GO_KR_KEY, 
-        "pageNo": "1",                 
-        "numOfRows": "20",             
-        "_type": "json"                
+        "OC": LAW_GO_OC,
+        "target": "expc",       # 👈 법령해석례 타겟 명시
+        "ID": str(random_id),   # 👈 랜덤으로 생성한 일련번호 저격
+        "type": "HTML",         # 👈 가이드대로 HTML 지정
+        "mobileYn": "Y"         # 👈 가이드 필수값 설정
     }
     
     try:
         response = requests.get(url, params=params, timeout=10)
         if response.status_code != 200:
-            st.error(f"⚠️ API 서버 응답 오류 (Status: {response.status_code})")
-            return None
+            return None, f"법제처 통신 실패 (코드: {response.status_code})"
             
-        data = response.json()
-        items_list = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+        # 법제처가 준 HTML 덩어리에서 글자 찌꺼기를 파이썬 BeautifulSoup으로 청소합니다.
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        # 전체 텍스트 추출 및 공백 정리
+        cleaned_text = soup.get_text(separator="\n").strip()
+        
+        if "조회된 데이터가 없습니다" in cleaned_text or len(cleaned_text) < 100:
+            # 주사위 번호가 빈 사물함일 경우 한 번 더 재귀 호출하거나 패스
+            return None, "빈 사물함(존재하지 않는 ID)이 뽑혔습니다. 다시 눌러보세요."
             
-        if not items_list:
-            st.warning("조회된 데이터가 없습니다.")
-            return None
-            
-        # 20개 안건 목록 중 백엔드에서 무작위 1건 추출
-        return random.choice(items_list)
+        return random_id, cleaned_text
     except Exception as e:
-        st.error(f"⚠️ 법제처 API 통신 실패: {e}")
-        return None
+        return None, f"API 가동 에러: {e}"
 
 # ====================================================================
-# 4. 파인튜닝 엔드포인트 호출 함수
+# 3. 파인튜닝 모델 호출 함수
 # ====================================================================
-def predict_law_translation(user_text, law_context):
+def predict_law_translation(law_context):
     full_model_path = f"projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/{ENDPOINT_ID}"
     
     prompt = f"""
-    당신은 대한민국 관세 및 법률 전문가이자 최고의 번역가입니다.
-    [법제처 API 실시간 참조 데이터]의 내용을 바탕으로, 사용자의 입력에 대해 정확한 러시아어(Russian) 번역 및 안내를 제공하세요.
-    제공된 정보의 법적 의미를 왜곡하지 말고, 파인튜닝된 스타일 가이드에 맞춰 전문적인 어조로 답변하세요.
+    당신은 대한민국 법률 전문가이자 최고의 번역가입니다.
+    다음 [법제처 실시간 해석례 본문]을 분석하고, 핵심 질의와 답변 내용을 요약하여 정확한 러시아어(Russian)로 전문적인 번역 가이드를 출력하세요.
 
-    [사용자 입력]: {user_text}
-    [법제처 API 실시간 참조 데이터]:
+    [법제처 실시간 해석례 본문]:
     {law_context}
     """
-
     try:
         response = client.models.generate_content(
             model=full_model_path,  
@@ -97,57 +96,31 @@ def predict_law_translation(user_text, law_context):
         )
         return response.text
     except Exception as e:
-        st.error(f"❌ 구글 튜닝 모델 호출 실패: {e}")
-        return None
+        return f"❌ 구글 튜닝 모델 호출 실패: {e}"
 
 # ====================================================================
-# 5. 실험실 UI 가동 (버튼 구조)
+# 4. 실험실 UI (버튼)
 # ====================================================================
 st.write("---")
-st.write("### 🎲 무작위 데이터 추출 및 번역 테스트")
-st.write("아래 버튼을 누르면 법제처 API에서 새로운 관세 해석례를 뽑아와 번역을 수행합니다.")
-
-# 대망의 테스트 가동 버튼!
-if st.button("🚀 법제처 데이터 랜덤 호출 및 러시아어 번역 시작", type="primary"):
+if st.button("🎲 법제처 메인 서버에서 랜덤 ID 저격 호출하기", type="primary"):
     
-    # 1단계: 데이터 가져오기
-    with st.spinner("1. 법제처 API 실시간 노크 중..."):
-        raw_item = get_random_law_from_public_api()
+    with st.spinner("법제처 메인 서버에 무작위 ID 찌르는 중..."):
+        picked_id, fetched_context = get_law_expc_realtime()
         
-    if raw_item:
-        # 알맹이 변수 정리
-        title = raw_item.get("안건명", "제목 없음")
-        question = raw_item.get("질의요지", "내용 없음")
-        answer_text = raw_item.get("회답", "내용 없음")
-        org_name = raw_item.get("해석기관명", "관세청")
+    if picked_id:
+        st.toast(f"📥 ID {picked_id}번 저격 성공!", icon="✅")
         
-        # 주입할 컨텍스트 조립
-        law_context = f"[해석기관]: {org_name}\n[안건명]: {title}\n[질의요지]: {question}\n[회답]: {answer_text}"
-        
-        st.toast(f"📥 데이터 가져오기 성공: {title}", icon="✅")
-        
-        # 화면을 좌우 2분할(Column)해서 왼쪽엔 한국어 원문, 오른쪽엔 러시아어 번역 매칭
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.info("### 🇰🇷 법제처 원문 데이터 (입력 팩트)")
-            st.markdown(f"**🏢 해석 기관:** {org_name}")
-            st.markdown(f"**📌 안 건 명:** {title}")
-            with st.expander("🔎 상세 질의요지 보기", expanded=True):
-                st.write(question)
-            with st.expander("📝 공식 회답 보기", expanded=True):
-                st.write(answer_text)
-                
-        # 2단계: 튜닝 모델 찌르기
+            st.info(f"### 🇰🇷 법제처 실시간 원문 (ID: {picked_id})")
+            # 텍스트가 너무 길면 보기 힘드니까 스크롤 박스 형태로 출력
+            st.text_area("HTML 파싱 완료된 원본 데이터", fetched_context, height=450)
+            
         with col2:
-            st.success("### 🇷🇺 파인튜닝 Gemini 3 Flash 번역 결과")
-            with st.spinner("2. 튜닝 엔드포인트에서 러시아어 문장 생성 중..."):
-                # 버튼 기반 테스트이므로 사용자 입력 자리에 안건명을 대표로 주입
-                translated_result = predict_law_translation(title, law_context)
-                
-            if translated_result:
-                st.markdown(translated_result)
-            else:
-                st.error("러시아어 답변 추출 실패")
+            st.success("### 🇷🇺 파인튜닝 모델 러시아어 가이드")
+            with st.spinner("튜닝 모델이 원문을 기반으로 변환 중..."):
+                translated_result = predict_law_translation(fetched_context)
+            st.markdown(translated_result)
     else:
-        st.error("법제처로부터 데이터를 가져오지 못했습니다.")
+        # 빈 사물함 떴을 때 안내
+        st.warning(fetched_context)
