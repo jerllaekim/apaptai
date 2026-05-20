@@ -54,7 +54,7 @@ def predict_law_translation(law_title, law_context):
     
     prompt = f"""
     당신은 대한민국 관세 및 법률 전문가이자 최고의 번역가입니다.
-    다음 [제공된 대한민국 법률 및 해석례 정보]를 정밀히 분석하고, 정래님의 파인튜닝 가이드라인 스타일에 맞춰 이 내용의 요약 정보와 가이드를 정확한 러시아어(Russian)로 변환하여 출력하세요.
+    다음 [제공된 대한민국 법률 및 해석례 정보]를 정밀히 분석하고, 러시아어(Russian)로 변역한 문장만 내놓으시오.
 
     [대상 안건/법령명]: {law_title}
     [제공된 대한민국 법률 및 해석례 정보]:
@@ -115,6 +115,6 @@ if st.button("🚀 30만 문장 파인튜닝 모델 번역 가동", type="primar
         
     with col2:
         st.success("### 🇷🇺 파인튜닝 모델 러시아어 가이드 출력")
-        with st.spinner("🤖 정래님의 찐 엔드포인트 서버가 정밀 번역 중..."):
+        with st.spinner("정밀 번역 중..."):
             translated_result = predict_law_translation(input_title, input_context)
         st.markdown(translated_result)
