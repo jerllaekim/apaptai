@@ -6,7 +6,7 @@ from google.genai import types
 from google.oauth2 import service_account
 
 # 1. 인증 설정 (검증된 방식)
-st.set_page_config(page_title="한-러 법률 번역 실험실", layout="wide")
+st.set_page_config(page_title="이민자의 한국 정착을 위한 외국어 법률 도우미 (러시아어)", layout="wide")
 
 @st.cache_resource
 def get_client():
