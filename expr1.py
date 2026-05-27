@@ -1,4 +1,3 @@
-import json
 import streamlit as st
 import requests
 import random
@@ -7,85 +6,76 @@ from google.genai import types
 from google.oauth2 import service_account
 
 # ====================================================================
-# 0. 설정 및 인증
+# 1. 인증 설정 (Secrets 사용)
 # ====================================================================
-st.set_page_config(page_title="한-러 법률 번역 실험실", page_icon="🧪", layout="wide")
-st.title("🧪 한-러 법률 및 해석례 번역 실험실")
+st.set_page_config(page_title="한-러 법률 번역 실험실", layout="wide")
 
-try:
-    gcp_account_info = st.secrets["gcp_service_account"]
-    credentials = service_account.Credentials.from_service_account_info(
-        gcp_account_info
-    ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
-    
-    PROJECT_ID = "groovy-design-496111-h1"
-    LOCATION = "us-central1"
-    ENDPOINT_ID = "36530724077043712"
-    client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION, credentials=credentials)
-except Exception as e:
-    st.error(f"❌ 설정 실패: {e}")
-    st.stop()
+# (A) Vertex AI용 (파인튜닝된 엔드포인트 전용)
+gcp_info = st.secrets["gcp_service_account"]
+creds = service_account.Credentials.from_service_account_info(gcp_info)
+vertex_client = genai.Client(vertexai=True, project="groovy-design-496111-h1", 
+                             location="us-central1", credentials=creds)
+
+# (B) 일반 Gemini용 (데이터 분석 및 번역 연습용)
+standard_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # ====================================================================
-# 1. 데이터 로드 (깃허브 연동)
+# 2. 깃허브 데이터 로드
 # ====================================================================
 @st.cache_data
 def get_data_from_github():
     urls = {
-        "난민법": "https://raw.githubusercontent.com/사용자계정/레포지토리/main/난민법.txt",
-        "출입국관리법": "https://raw.githubusercontent.com/사용자계정/레포지토리/main/출입국관리법.txt",
-        "법령해석": "https://raw.githubusercontent.com/사용자계정/레포지토리/main/법령해석.txt"
+        "난민법": "https://raw.githubusercontent.com/jerllaekim/jusexpr1/main/data/난민법.txt",
+        "출입국관리법": "https://raw.githubusercontent.com/jerllaekim/jusexpr1/main/data/출입국관리법.txt",
+        "법령해석": "https://raw.githubusercontent.com/jerllaekim/jusexpr1/main/data/법령해석.txt"
     }
     return {name: requests.get(url).text for name, url in urls.items() if requests.get(url).status_code == 200}
 
 # ====================================================================
-# 2. 핵심 함수: 번역 및 RAG
+# 3. UI 및 기능 구현
 # ====================================================================
-def predict_law_translation(law_title, law_context):
-    full_model_path = f"projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/{ENDPOINT_ID}"
-    prompt = f"당신은 대한민국 법률 전문가입니다. [안건]: {law_title}\n[본문]: {law_context}\n위 내용을 러시아어로 번역하시오."
-    response = client.models.generate_content(model=full_model_path, contents=prompt)
-    return response.text
+tab1, tab2, tab3 = st.tabs(["💬 질문하기(일반 모델)", "✍️ 번역 연습", "🚀 파인튜닝 모델 번역"])
 
-# ====================================================================
-# 3. UI 구성 (탭 분리)
-# ====================================================================
-tab1, tab2, tab3 = st.tabs(["💬 법률 질문(RAG)", "✍️ 번역 연습실", "🚀 파인튜닝 모델 번역"])
-
-# TAB 1: RAG 질의응답
+# TAB 1: 일반 모델이 데이터 분석 및 문장 추출
 with tab1:
-    st.subheader("🔍 학습 데이터 기반 질의응답")
-    query = st.text_input("질문 입력", placeholder="예: 난민 신청자의 권리는?")
-    if st.button("질문하기"):
-        data = get_data_from_github()
-        prompt = f"데이터: {data}\n\n질문: {query}\n\n데이터에서 답을 찾으시오. 모르면 '데이터에서 찾을 수 없습니다'라고 하시오."
-        res = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
-        st.info(res.text)
+    st.subheader("🔍 일반 모델이 데이터에서 문장 찾기")
+    data_dict = get_data_from_github()
+    query = st.text_input("데이터에서 궁금한 점을 물어보세요.")
+    
+    if st.button("데이터 분석 및 추출"):
+        # 전체 텍스트를 모델에게 넘겨서 질문에 맞는 문장 뽑기 요청
+        combined_text = "\n".join([f"[{k}] {v}" for k, v in data_dict.items()])
+        prompt = f"다음 법률 데이터를 분석하여 질문에 대한 답변과 관련 문장을 추출하세요.\n\n데이터:{combined_text}\n\n질문:{query}"
+        
+        with st.spinner("Gemini가 데이터를 읽고 있습니다..."):
+            res = standard_client.models.generate_content(
+                model="gemini-1.5-flash", 
+                contents=prompt
+            )
+            st.info(res.text)
 
-# TAB 2: 번역 연습
+# TAB 2: 번역 연습 (기존 유지)
 with tab2:
     st.subheader("✍️ 번역 연습 및 피드백")
     data = get_data_from_github()
     all_text = " ".join(data.values()).split("\n")
-    if st.button("연습 문장 뽑기"):
-        st.session_state.practice_text = random.choice([t for t in all_text if len(t) > 20])
+    if st.button("연습 문장 뽑기"): st.session_state.p_text = random.choice([t for t in all_text if len(t) > 20])
     
-    p_text = st.session_state.get("practice_text", "버튼을 눌러 문장을 불러오세요.")
+    p_text = st.session_state.get("p_text", "문장을 불러오세요.")
     st.markdown(f"> **원문:** {p_text}")
+    trans = st.text_area("러시아어 번역 입력:")
     
-    user_trans = st.text_area("러시아어 번역 입력:")
-    if st.button("결과 확인"):
-        fb_prompt = f"원문: {p_text}\n사용자 번역: {user_trans}\n\n법률적 관점에서 피드백과 수정안을 주시오."
-        feedback = client.models.generate_content(model="gemini-1.5-flash", contents=fb_prompt)
-        st.success(feedback.text)
+    if st.button("피드백 받기"):
+        fb = standard_client.models.generate_content(model="gemini-1.5-flash", 
+             contents=f"원문:{p_text}\n번역:{trans}\n법률 관점에서 평가하시오.")
+        st.success(fb.text)
 
-# TAB 3: 기존 파인튜닝 모델 활용
+# TAB 3: 파인튜닝 모델 번역 (기존 유지)
 with tab3:
-    st.subheader("🚀 파인튜닝 모델 번역 가동")
-    col1, col2 = st.columns(2)
-    with col1:
-        in_title = st.text_input("안건명")
-        in_ctx = st.text_area("본문 입력")
-    with col2:
-        if st.button("번역 실행"):
-            st.markdown(predict_law_translation(in_title, in_ctx))
+    st.subheader("🚀 파인튜닝 모델 번역")
+    title = st.text_input("안건명")
+    ctx = st.text_area("본문 입력")
+    if st.button("번역 실행"):
+        path = "projects/groovy-design-496111-h1/locations/us-central1/endpoints/36530724077043712"
+        res = vertex_client.models.generate_content(model=path, contents=f"안건:{title}\n본문:{ctx}")
+        st.markdown(res.text)
