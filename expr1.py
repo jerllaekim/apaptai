@@ -118,3 +118,55 @@ if st.button("🚀 30만 문장 파인튜닝 모델 번역 가동", type="primar
         with st.spinner("정밀 번역 중..."):
             translated_result = predict_law_translation(input_title, input_context)
         st.markdown(translated_result)
+@st.cache_data
+def get_data_from_github():
+    urls = {
+        "난민법": "https://raw.githubusercontent.com/.../난민법.txt",
+        "출입국관리법": "https://raw.githubusercontent.com/.../출입국관리법.txt",
+        "법령해석": "https://raw.githubusercontent.com/.../법령해석.txt"
+    }
+    return {name: requests.get(url).text for name, url in urls.items()}
+
+# 탭 나누기
+tab1, tab2 = st.tabs(["💬 법률 질문(RAG)", "✍️ 번역 연습실"])
+
+# ====================================================================
+# TAB 1: 법률 질문 (RAG)
+# ====================================================================
+with tab1:
+    st.subheader("🔍 학습 데이터 기반 질의응답")
+    query = st.text_input("질문 입력", placeholder="예: 난민법상 난민의 지위는?")
+    if st.button("질문하기"):
+        data = get_data_from_github()
+        prompt = f"데이터: {data}\n\n질문: {query}\n\n위 데이터에서 답을 찾으시오. 모르면 '데이터에서 찾을 수 없습니다'라고 하시오."
+        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        st.info(response.text)
+
+# ====================================================================
+# TAB 2: 번역 연습 (원래 코드 확장)
+# ====================================================================
+with tab2:
+    st.subheader("✍️ 번역 연습 및 피드백")
+    data = get_data_from_github()
+    all_text = " ".join(data.values()).split("\n")
+    
+    if st.button("연습 문장 뽑기"):
+        st.session_state.practice_text = random.choice([t for t in all_text if len(t) > 20])
+    
+    p_text = st.session_state.get("practice_text", "버튼을 눌러 문장을 불러오세요.")
+    st.markdown(f"> **원문:** {p_text}")
+    
+    user_trans = st.text_area("러시아어 번역 입력:")
+    
+    if st.button("결과 확인"):
+        # 1. 사용자가 번역한 문장을 원래 만드신 파인튜닝 모델로 평가하기
+        # 여기서는 평가용 프롬프트를 따로 구성합니다.
+        feedback_prompt = f"원문: {p_text}\n사용자 번역: {user_trans}\n\n법률 전문가로서 이 번역의 정확도를 평가하고 수정안을 제시하시오."
+        feedback = client.models.generate_content(model="gemini-1.5-flash", contents=feedback_prompt)
+        st.success(feedback.text)
+
+# ====================================================================
+# 기존의 30만 문장 파인튜닝 모델 번역 (연습실 아래나 별도 섹션으로 배치)
+# ====================================================================
+st.write("---")
+# [여기서부터 기존의 predict_law_translation 함수를 사용하는 번역 섹션을 배치하면 됩니다.]
