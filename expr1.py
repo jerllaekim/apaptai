@@ -48,7 +48,6 @@ def get_data_from_github():
     return {k: requests.get(v).text for k, v in urls.items() if requests.get(v).status_code == 200}
 
 # 4. UI 탭 구성
-# 4. UI 탭 구성
 st.title("이민자의 한국 정착을 위한 외국어 법률 도우미 (러시아어)")
 # 아래 문구를 추가했습니다.
 st.caption("법제처 API 호출 관련 문제로 현재는 백업된 데이터에서만 질문이 가능합니다.")
