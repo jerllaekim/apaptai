@@ -69,7 +69,7 @@ with tab2:
         st.session_state.p_text = random.choice(sentences)
     
     # 추가된 안내 문구
-    st.caption("문장이 너무 길다면 버튼을 한 번 더 눌러 짧은 문장으로 연습해보세요")
+    st.caption("문장이 너무 길거나 온전하지 않다면 버튼을 한 번 더 눌러 짧은 문장으로 연습해보세요")
     
     p_text = st.session_state.get("p_text", "버튼을 눌러 문장을 불러오세요.")
     st.markdown(f"> **원문:** {p_text}")
