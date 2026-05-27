@@ -75,7 +75,14 @@ with tab2:
 
 with tab3:
     st.subheader("파인튜닝 번역 실행")
-    ctx = st.text_area("번역할 본문")
+    # title 입력란 삭제 후 본문 입력만 유지
+    ctx = st.text_area("번역할 법률 본문 입력", height=200)
+    
     if st.button("번역 실행"):
-        prompt = f"안건: {title}\n본문: {ctx}\n위 본문을 법률 용어에 맞게 러시아어로 번역하시오."
-        st.markdown(get_model_response(prompt))
+        if not ctx.strip():
+            st.warning("⚠️ 번역할 본문을 입력해주세요.")
+        else:
+            # 프롬프트에서 안건명 변수를 제거하고 본문 중심의 번역 요청으로 변경
+            prompt = f"다음 법률 본문을 정밀하게 러시아어로 번역하시오:\n\n{ctx}"
+            with st.spinner("번역 중..."):
+                st.markdown(get_model_response(prompt))
