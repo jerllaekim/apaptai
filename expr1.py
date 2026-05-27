@@ -56,7 +56,7 @@ with tab1:
     query = st.text_input("질문 입력", placeholder="법령 내용이나 해석에 대해 물어보세요.")
     if st.button("질문 분석"):
         data = get_data_from_github()
-        prompt = f"데이터베이스 정보: {str(data)[:2000]}\n질문: {query}\n위 데이터를 바탕으로 법률 전문가로서 답변하시오, 위 데이터에서 알맞은 내용이 없으면 찾을 수 없다고 제시하세요."
+        prompt = f"데이터베이스 정보: {str(data)[:2000]}\n질문: {query}\n위 데이터를 바탕으로 법률 전문가로서 답변하시오, 위 데이터에서 알맞은 내용이 없으면 찾을 수 없다고 제시하세요 (한국어 및 러시아어로)."
         st.info(get_model_response(prompt))
 
 with tab2:
@@ -70,7 +70,7 @@ with tab2:
     st.markdown(f"> **원문:** {p_text}")
     trans = st.text_area("당신의 번역:")
     if st.button("피드백 받기"):
-        prompt = f"원문: {p_text}\n번역: {trans}\n법률적 관점에서 번역을 한국어 한문장, 러시아어 한문장으로 간결히 평가하고 올바른 번역안은 러시아어로 제시하시오."
+        prompt = f"원문: {p_text}\n번역: {trans}\n법률적 관점에서 번역을 한국어로 한문장 , 러시아어 한문장으로 간결히 평가하고 올바른 번역안은 러시아어로 제시하시오."
         st.success(get_model_response(prompt))
 
 with tab3:
