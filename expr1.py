@@ -1,15 +1,17 @@
 import streamlit as st
 import requests
 import random
+import re
 from google import genai
 from google.genai import types
 from google.oauth2 import service_account
 
-# 1. 인증 설정 (검증된 방식)
+# 1. 페이지 설정 및 인증 (검증된 방식)
 st.set_page_config(page_title="이민자의 한국 정착을 위한 외국어 법률 도우미 (러시아어)", layout="wide")
 
 @st.cache_resource
 def get_client():
+    # secrets.toml 파일에 [gcp_service_account] 섹션이 있어야 합니다.
     gcp_account_info = st.secrets["gcp_service_account"]
     credentials = service_account.Credentials.from_service_account_info(
         gcp_account_info
@@ -47,10 +49,10 @@ def get_data_from_github():
     }
     return {k: requests.get(v).text for k, v in urls.items() if requests.get(v).status_code == 200}
 
-# 4. UI 탭 구성
+# 4. UI 구성
 st.title("이민자의 한국 정착을 위한 외국어 법률 도우미 (러시아어)")
-# 아래 문구를 추가했습니다.
 st.caption("법제처 API 호출 관련 문제로 현재는 백업된 데이터에서만 질문이 가능합니다.")
+
 tab1, tab2, tab3 = st.tabs(["💬 법률 질문/분석", "✍️ 번역 연습", "🚀 파인튜닝 번역"])
 
 with tab1:
@@ -65,8 +67,16 @@ with tab2:
     st.subheader("번역 연습")
     if st.button("연습할 문장 뽑기"):
         data = get_data_from_github()
-        sentences = [s.strip() for s in " ".join(data.values()).split(".") if len(s) > 30]
-        st.session_state.p_text = random.choice(sentences)
+        # . 또는 , 기준으로 쪼개고 공백 제거
+        raw_text = " ".join(data.values())
+        chunks = re.split(r'[.,]', raw_text)
+        # 10자 이상 50자 이하인 문장만 필터링
+        sentences = [s.strip() for s in chunks if 10 < len(s.strip()) <= 50]
+        
+        if sentences:
+            st.session_state.p_text = random.choice(sentences)
+        else:
+            st.warning("적절한 길이의 문장을 찾지 못했습니다.")
     
     p_text = st.session_state.get("p_text", "버튼을 눌러 문장을 불러오세요.")
     st.markdown(f"> **원문:** {p_text}")
@@ -77,14 +87,13 @@ with tab2:
 
 with tab3:
     st.subheader("파인튜닝 번역 실행")
-    # title 입력란 삭제 후 본문 입력만 유지
     ctx = st.text_area("번역할 법률 본문 입력", height=200)
     
     if st.button("번역 실행"):
         if not ctx.strip():
             st.warning("⚠️ 번역할 본문을 입력해주세요.")
         else:
-            # 프롬프트에서 안건명 변수를 제거하고 본문 중심의 번역 요청으로 변경
+            # 본문 중심의 번역 요청
             prompt = f"다음 법률 본문을 정밀하게 러시아어로 번역하시오:\n\n{ctx}"
             with st.spinner("번역 중..."):
                 st.markdown(get_model_response(prompt))
