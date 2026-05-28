@@ -58,7 +58,7 @@ with tab1:
     query = st.text_input("질문 입력", placeholder="법령 내용이나 해석에 대해 물어보세요.")
     if st.button("질문 분석"):
         data = get_data_from_github()
-        prompt = f"데이터베이스 정보: {str(data)[:2000]}\n질문: {query}\n위 데이터를 바탕으로 법률 전문가로서 답변하시오, 위 데이터에서 알맞은 내용이 없으면 찾을 수 없다고 제시하세요 (한국어 및 러시아어로)."
+        prompt = f"데이터베이스 정보: {str(data)[:2000]}\n질문: {query}\n위 데이터를 바탕으로 법률 전문가로서 답변하시오, 위 데이터에서 알맞은 내용이 없으면 찾을 수 없다고 한국어와 러시아어로 제시하세요."
         st.info(get_model_response(prompt))
 
 with tab2:
